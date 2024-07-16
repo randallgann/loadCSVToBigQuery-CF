@@ -41,6 +41,10 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
 
         _logger.LogInformation($"Processing file: {objectName} from bucket: {bucketName}");
 
+        int LoadedToDBCount = 0;
+        int UpdatedToDBCount = 0;
+        int DiscardedCount = 0;
+
         var stream = new MemoryStream();
         await _storageClient.DownloadObjectAsync(bucketName, objectName, stream);
         stream.Seek(0, SeekOrigin.Begin);
@@ -54,43 +58,21 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
 
                 foreach (var record in records)
                 {
+                    var existingRecord = await GetExistingRecordAsync(_bigQueryClient, datasetId, tableId, record.MLS);
 
-                    var recordDictionary = new Dictionary<string, object>
+                    if (existingRecord == null)
                     {
-                        {"mls", record.MLS?.Trim()},
-                        {"class", record.Class?.Trim()},
-                        {"property_type", record.PropertyType?.Trim()},
-                        {"status", record.Status?.Trim()},
-                        {"price", record.Price?.Replace("$", "").Trim()},
-                        {"county", record.County?.Trim()},
-                        {"address", record.Address?.Trim()},
-                        {"city", record.City?.Trim()},
-                        {"zip", record.Zip?.Trim()},
-                        {"beds", record.Beds?.Trim()},
-                        {"baths", record.Baths?.Trim()},
-                        {"half_baths", record.HalfBaths?.Trim()},
-                        {"garage", record.Garage?.Trim()},
-                        {"sq_feet", record.SqFeet?.Trim()},
-                        {"list_agent", record.ListAgent?.Trim()},
-                        {"list_office", record.ListOffice?.Trim()}
-                    };
-
-                    var rowInsert = new BigQueryInsertRow
-                    {
-                        recordDictionary
-                    };
-                    _logger.LogInformation("Attempting to insert row into BigQuery");
-
-                    try
-                    {
-                        await _bigQueryClient.InsertRowsAsync(datasetId, tableId, new[] { rowInsert });
-                        var recordValues = string.Join(", ", recordDictionary.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
-                        _logger.LogInformation($"Successfully inserted row with values: {recordValues}");
+                        await InsertRecord(_bigQueryClient, datasetId, tableId, record);
+                        LoadedToDBCount++;
                     }
-                    catch (Exception ex)
+                    else if (HasRecordChanged(existingRecord, record))
                     {
-                        var recordValues = string.Join(", ", recordDictionary.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
-                        _logger.LogError($"Failed to insert row with values: {recordValues}. Exception: {ex.Message}");
+                        await InsertRecord(_bigQueryClient, datasetId, tableId, record);
+                        UpdatedToDBCount++;
+                    }
+                    else
+                    {
+                        DiscardedCount++;
                     }
                 }
             }
@@ -99,7 +81,76 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
                 _logger.LogError($"Failed to read CSV file: {objectName}. Exception: {ex.Message}");
             }
 
-            _logger.LogInformation($"CSV data from {objectName} inserted into BigQuery table {tableId}");
+            _logger.LogInformation($"CSV data from {objectName} inserted into BigQuery table {tableId}.  Loaded: {LoadedToDBCount}, Updated: {UpdatedToDBCount}, Discarded: {DiscardedCount}");
+        }
+    }
+
+    private async Task<BigQueryRow> GetExistingRecordAsync(BigQueryClient client, string datasetId, string tableId, string mls)
+    {
+        var query = $"SELECT * FROM `{datasetId}.{tableId}` WHERE mls = @mls";
+        var parameters = new[] { new BigQueryParameter("mls", BigQueryDbType.String, mls) };
+        var result = await client.ExecuteQueryAsync(query, parameters);
+
+        return result.SingleOrDefault();
+    }
+
+    private bool HasRecordChanged(BigQueryRow existingRecord, CsvRecord newRecord)
+    {
+        return !existingRecord["class"].ToString().Equals(newRecord.Class?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["property_type"].ToString().Equals(newRecord.PropertyType?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["status"].ToString().Equals(newRecord.Status?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["price"].ToString().Equals(newRecord.Price?.Replace("$", "").Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["county"].ToString().Equals(newRecord.County?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["address"].ToString().Equals(newRecord.Address?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["city"].ToString().Equals(newRecord.City?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["zip"].ToString().Equals(newRecord.Zip?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["beds"].ToString().Equals(newRecord.Beds?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["baths"].ToString().Equals(newRecord.Baths?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["half_baths"].ToString().Equals(newRecord.HalfBaths?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["garage"].ToString().Equals(newRecord.Garage?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["sq_feet"].ToString().Equals(newRecord.SqFeet?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["list_agent"].ToString().Equals(newRecord.ListAgent?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["list_office"].ToString().Equals(newRecord.ListOffice?.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task InsertRecord(BigQueryClient client, string datasetId, string tableId, CsvRecord record)
+    {
+        var recordDictionary = new Dictionary<string, object>
+            {
+                {"mls", record.MLS?.Trim()},
+                {"class", record.Class?.Trim()},
+                {"property_type", record.PropertyType?.Trim()},
+                {"status", record.Status?.Trim()},
+                {"price", record.Price?.Replace("$", "").Trim()},
+                {"county", record.County?.Trim()},
+                {"address", record.Address?.Trim()},
+                {"city", record.City?.Trim()},
+                {"zip", record.Zip?.Trim()},
+                {"beds", record.Beds?.Trim()},
+                {"baths", record.Baths?.Trim()},
+                {"half_baths", record.HalfBaths?.Trim()},
+                {"garage", record.Garage?.Trim()},
+                {"sq_feet", record.SqFeet?.Trim()},
+                {"list_agent", record.ListAgent?.Trim()},
+                {"list_office", record.ListOffice?.Trim()}
+            };
+
+        var rowInsert = new BigQueryInsertRow
+            {
+                recordDictionary
+            };
+        _logger.LogInformation("Attempting to insert row into BigQuery");
+
+        try
+        {
+            await client.InsertRowsAsync(datasetId, tableId, new[] { rowInsert });
+            var recordValues = string.Join(", ", recordDictionary.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+            _logger.LogInformation($"Successfully inserted row with values: {recordValues}");
+        }
+        catch (Exception ex)
+        {
+            var recordValues = string.Join(", ", recordDictionary.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+            _logger.LogError($"Failed to insert row with values: {recordValues}. Exception: {ex.Message}");
         }
     }
 
