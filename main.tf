@@ -99,10 +99,10 @@ resource "google_cloudfunctions2_function" "load_csv_to_bigquery" {
     }
 
     service_config {
-        max_instance_count = 2
+        max_instance_count = 1
         min_instance_count = 1
         available_memory = "256M"
-        timeout_seconds = 60
+        timeout_seconds = 540
         ingress_settings = "ALLOW_INTERNAL_ONLY"
         all_traffic_on_latest_revision = true
         service_account_email = google_service_account.account.email
@@ -113,6 +113,7 @@ resource "google_cloudfunctions2_function" "load_csv_to_bigquery" {
           TABLE_ID = var.bigquery_table
         }
     }
+    
 
     event_trigger {
         trigger_region = "us-central1"

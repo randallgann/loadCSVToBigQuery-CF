@@ -54,7 +54,12 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
         {
             try
             {
-                var records = csv.GetRecords<CsvRecord>();
+                var records = csv.GetRecords<CsvRecord>().ToList();
+                int totalRecords = records.Count;
+                _logger.LogInformation($"Total records to be processed: {totalRecords}");
+
+                int processedCount = 0;
+
 
                 foreach (var record in records)
                 {
@@ -72,7 +77,15 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
                     }
                     else
                     {
+                        _logger.LogInformation($"Record with MLS: {record.MLS} already exists in BigQuery and has not changed. Skipping.");
                         DiscardedCount++;
+                    }
+
+                    processedCount++;
+
+                    if (processedCount % 1000 == 0)
+                    {
+                        _logger.LogInformation($"Processed {processedCount} records out of {totalRecords}. Remaining: {totalRecords - processedCount}");
                     }
                 }
             }
@@ -99,7 +112,7 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
         return !existingRecord["class"].ToString().Equals(newRecord.Class?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                !existingRecord["property_type"].ToString().Equals(newRecord.PropertyType?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                !existingRecord["status"].ToString().Equals(newRecord.Status?.Trim(), StringComparison.OrdinalIgnoreCase) ||
-               !existingRecord["price"].ToString().Equals(newRecord.Price?.Replace("$", "").Trim(), StringComparison.OrdinalIgnoreCase) ||
+               !existingRecord["price"].ToString().Equals(new string(newRecord.Price?.Where(char.IsDigit).ToArray()), StringComparison.OrdinalIgnoreCase) ||
                !existingRecord["county"].ToString().Equals(newRecord.County?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                !existingRecord["address"].ToString().Equals(newRecord.Address?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                !existingRecord["city"].ToString().Equals(newRecord.City?.Trim(), StringComparison.OrdinalIgnoreCase) ||
@@ -121,7 +134,7 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
                 {"class", record.Class?.Trim()},
                 {"property_type", record.PropertyType?.Trim()},
                 {"status", record.Status?.Trim()},
-                {"price", record.Price?.Replace("$", "").Trim()},
+                {"price", new string(record.Price?.Where(char.IsDigit).ToArray())},
                 {"county", record.County?.Trim()},
                 {"address", record.Address?.Trim()},
                 {"city", record.City?.Trim()},
