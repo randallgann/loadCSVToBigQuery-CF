@@ -95,7 +95,24 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
             }
 
             _logger.LogInformation($"CSV data from {objectName} inserted into BigQuery table {tableId}.  Loaded: {LoadedToDBCount}, Updated: {UpdatedToDBCount}, Discarded: {DiscardedCount}");
+
+            // Delete the file after processing
+            try
+            {
+                await DeleteFileAsync(_storageClient, bucketName, objectName);
+                _logger.LogInformation($"Successfully deleted file: {objectName} from bucket: {bucketName}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to delete file: {objectName} from bucket: {bucketName}. Exception: {ex.Message}");
+            }
         }
+    }
+
+    private async Task DeleteFileAsync(StorageClient storageClient, string bucketName, string objectName)
+    {
+        await storageClient.DeleteObjectAsync(bucketName, objectName);
+        _logger.LogInformation($"File {objectName} deleted from bucket {bucketName}");
     }
 
     private async Task<BigQueryRow> GetExistingRecordAsync(BigQueryClient client, string datasetId, string tableId, string mls)

@@ -3,12 +3,20 @@ provider "google" {
     region = var.region
 }
 
-data "google_storage_bucket" "source-bucket" {
-    name = "cvs-by-zip"
+resource "google_storage_bucket" "csv_by_zip" {
+    name = "csv-by-zip"
+    location = var.region
+    uniform_bucket_level_access = true
+}
+
+resource "google_storage_bucket" "csv_by_zip_split_files" {
+    name = "csv-by-zip-split-files"
+    location = var.region
+    uniform_bucket_level_access = true
 }
 
 resource "google_storage_bucket" "functions_bucket"{
-    name = "real_estate_data_functions_bucket"
+    name = "real-estate-data-functions-bucket"
     location = var.region
     uniform_bucket_level_access = true
 }
@@ -22,17 +30,16 @@ resource "google_project_iam_member" "gcs-pubsub-publishing" {
     member = "serviceAccount:${data.google_storage_project_service_account.gcs-service-account.email_address}"
 }
 
-resource "google_storage_bucket_object" "object" {
+resource "google_storage_bucket_object" "load-csv-to-bigquery-zip-object" {
     name = "LoadCSVToBigQuery.zip"
     bucket = google_storage_bucket.functions_bucket.name
     source = "LoadCsvToBigQuery/LoadCSVToBigQuery.zip"
 }
 
-resource "google_storage_bucket" "trigger-bucket" {
-    name = "real_estate_data_trigger_bucket"
-    location = var.region
-    uniform_bucket_level_access = true
-
+resource "google_storage_bucket_object" "create-csv-split-files-zip-object" {
+    name = "CreateCsvSplitFiles.zip"
+    bucket = google_storage_bucket.functions_bucket.name
+    source = "CreateCsvSplitFiles/CreateCsvSplitFiles.zip"
 }
 
 resource "google_service_account" "account" {
@@ -99,9 +106,9 @@ resource "google_cloudfunctions2_function" "load_csv_to_bigquery" {
     }
 
     service_config {
-        max_instance_count = 1
+        max_instance_count = 100
         min_instance_count = 1
-        available_memory = "256M"
+        available_memory = "512M"
         timeout_seconds = 540
         ingress_settings = "ALLOW_INTERNAL_ONLY"
         all_traffic_on_latest_revision = true
@@ -122,7 +129,7 @@ resource "google_cloudfunctions2_function" "load_csv_to_bigquery" {
         service_account_email = google_service_account.account.email
         event_filters {
             attribute = "bucket"
-            value = data.google_storage_bucket.source-bucket.name
+            value = google_storage_bucket.csv_by_zip_split_files.name
         }
     }
 
@@ -133,7 +140,61 @@ resource "google_cloudfunctions2_function" "load_csv_to_bigquery" {
         google_project_iam_member.invoking,
         google_project_iam_member.gcs-pubsub-publishing,
         google_project_iam_member.storage-admin,
-        google_storage_bucket_object.object
+        google_storage_bucket_object.load-csv-to-bigquery-zip-object
+    ]
+}
+
+resource "google_cloudfunctions2_function" "create_csv_split_files" {
+    name = "create-csv-split-files"
+    location = var.region
+    description = "A function that is triggered by a Cloud Storage bucket and splits a CSV file into multiple files"
+
+    build_config {
+      runtime = "dotnet6"
+      entry_point = "CreateCsvSplitFiles.CreateCsvSplitFilesFunction"
+      source {
+        storage_source {
+            bucket = google_storage_bucket.functions_bucket.name
+            object = "CreateCsvSplitFiles.zip"
+        }
+      }
+    }
+
+    service_config {
+        max_instance_count = 1
+        min_instance_count = 1
+        available_memory = "256M"
+        timeout_seconds = 540
+        ingress_settings = "ALLOW_INTERNAL_ONLY"
+        all_traffic_on_latest_revision = true
+        service_account_email = google_service_account.account.email
+        environment_variables = {
+          SERVICE_CONFIG_TEST = "config_test"
+          GCP_PROJECT = var.project_id
+          SPLIT_FILES_BUCKET_NAME = google_storage_bucket.csv_by_zip_split_files.name
+        }
+    }
+    
+
+    event_trigger {
+        trigger_region = "us-central1"
+        event_type = "google.cloud.storage.object.v1.finalized"
+        retry_policy = "RETRY_POLICY_RETRY"
+        service_account_email = google_service_account.account.email
+        event_filters {
+            attribute = "bucket"
+            value = google_storage_bucket.csv_by_zip.name
+        }
+    }
+
+    depends_on = [
+        google_project_iam_member.bg-admin,
+        google_project_iam_member.artifactregistry-reader,
+        google_project_iam_member.event-receiving,
+        google_project_iam_member.invoking,
+        google_project_iam_member.gcs-pubsub-publishing,
+        google_project_iam_member.storage-admin,
+        google_storage_bucket_object.create-csv-split-files-zip-object
     ]
 }
 
@@ -142,7 +203,7 @@ resource "google_bigquery_dataset" "dataset" {
     location = var.region
 }
 
-resource "google_bigquery_table" "table_by_zipcode" {
+resource "google_bigquery_table" "mls_defined_properties_table" {
     dataset_id = google_bigquery_dataset.dataset.dataset_id
     table_id = var.bigquery_table
     deletion_protection = false

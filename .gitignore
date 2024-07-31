@@ -7,3 +7,8 @@ LoadCsvToBigQuery/LoadCSVToBigQuery.zip
 LoadCsvToBigQuery/bin/Debug*
 LoadCsvToBigQuery/bin/Release*
 LoadCsvToBigQuery/obj*
+CreateCsvSplitFiles/CreateCsvSplitFiles.zip
+CreateCsvSplitFiles/bin/Debug*
+CreateCsvSplitFiles/bin/Release*
+CreateCsvSplitFiles/obj*
+*.sln
