@@ -289,6 +289,16 @@ resource "google_bigquery_table" "mls_defined_properties_table" {
             "name": "list_office",
             "type": "STRING",
             "mode": "REQUIRED"
+        },
+        {
+            "name": "price_sq_feet",
+            "type": "NUMERIC",
+            "mode": "REQUIRED"
+        },
+        {
+            "name": "last_updt_ts",
+            "type": "DATETIME",
+            "mode": "REQUIRED"
         }
     ]
     EOF

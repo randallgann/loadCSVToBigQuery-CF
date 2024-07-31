@@ -145,6 +145,10 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
 
     private async Task InsertRecord(BigQueryClient client, string datasetId, string tableId, CsvRecord record)
     {
+        var price = int.TryParse(new string(record.Price?.Where(char.IsDigit).ToArray()), out var parsedPrice) ? parsedPrice : 0;
+        var sqFeet = int.TryParse(record.SqFeet?.Trim(), out var parsedSqFeet) ? parsedSqFeet : 0;
+        var priceSqFeet = sqFeet > 0 ? price / sqFeet : 0;
+
         var recordDictionary = new Dictionary<string, object>
             {
                 {"mls", record.MLS?.Trim()},
@@ -161,6 +165,8 @@ public class LoadCSVToBigQueryFunction : ICloudEventFunction<StorageObjectData>
                 {"half_baths", record.HalfBaths?.Trim()},
                 {"garage", record.Garage?.Trim()},
                 {"sq_feet", record.SqFeet?.Trim()},
+                {"price_sq_feet", priceSqFeet},
+                {"last_updt_ts", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")},
                 {"list_agent", record.ListAgent?.Trim()},
                 {"list_office", record.ListOffice?.Trim()}
             };
