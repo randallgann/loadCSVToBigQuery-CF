@@ -26,6 +26,8 @@ public class CreateCsvSplitFilesFunction : ICloudEventFunction<StorageObjectData
         _logger.LogInformation("CreateCsvSplitFilesFunction triggered by Cloud Storage event.");
         string bucketName = data.Bucket;
         string objectName = data.Name;
+        string objectFileName = objectName.Split('.')[0];
+
 
         string splitFilesBucketName = Environment.GetEnvironmentVariable("SPLIT_FILES_BUCKET_NAME");
 
@@ -62,7 +64,7 @@ public class CreateCsvSplitFilesFunction : ICloudEventFunction<StorageObjectData
 
                             if (lineCounter == 100)
                             {
-                                WriteBatchToFile(currentBatch, header, _storageClient, fileCounter, splitFilesBucketName);
+                                WriteBatchToFile(currentBatch, header, _storageClient, fileCounter, splitFilesBucketName, objectFileName);
                                 currentBatch.Clear();
                                 lineCounter = 0;
                                 fileCounter++;
@@ -72,7 +74,7 @@ public class CreateCsvSplitFilesFunction : ICloudEventFunction<StorageObjectData
                         // Write any remaining lines
                         if (currentBatch.Count > 0)
                         {
-                            WriteBatchToFile(currentBatch, header, _storageClient, fileCounter, splitFilesBucketName);
+                            WriteBatchToFile(currentBatch, header, _storageClient, fileCounter, splitFilesBucketName, objectFileName);
                         }
                     }
                     catch (Exception e)
@@ -91,9 +93,9 @@ public class CreateCsvSplitFilesFunction : ICloudEventFunction<StorageObjectData
         _logger.LogInformation("CreateCsvSplitFilesFunction completed.");
     }
 
-    public void WriteBatchToFile(List<string> batch, string header, StorageClient storageClient, int fileNumber, string splitFilesBucketName)
+    public void WriteBatchToFile(List<string> batch, string header, StorageClient storageClient, int fileNumber, string splitFilesBucketName, string objectFileName)
     {
-        string fileName = $"zip-code-split-file-{fileNumber:D3}.csv";
+        string fileName = $"{objectFileName}-{fileNumber:D3}.csv";
 
         using (var memoryStream = new MemoryStream())
         using (var writer = new StreamWriter(memoryStream, Encoding.UTF8))
